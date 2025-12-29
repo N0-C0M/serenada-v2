@@ -448,3 +448,109 @@ body {
     opacity: 0;
   }
 }
+/* Recent Calls Table */
+.recent-calls {
+  margin-top: 3rem;
+  width: 100%;
+  max-width: 500px;
+  text-align: left;
+  animation: fadeIn 0.5s ease;
+}
+
+.recent-calls-label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1rem;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+.recent-calls-table-container {
+  background: var(--surface-color);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.recent-calls-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.95rem;
+}
+
+.recent-calls-table th {
+  text-align: left;
+  padding: 1rem 1.25rem;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.recent-call-row {
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.recent-call-row:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.recent-call-row:hover {
+  background: rgba(47, 129, 247, 0.1);
+}
+
+.recent-call-row td {
+  padding: 1rem 1.25rem;
+  vertical-align: middle;
+}
+
+.recent-call-date-cell,
+.recent-call-duration-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.recent-call-icon {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.recent-call-row:hover .recent-call-icon {
+  color: var(--primary-color);
+  opacity: 1;
+}
+
+/* Compact Home Layout */
+.page-container.compact .home-content {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
+}
+
+.page-container.compact .title {
+  font-size: 3rem;
+  margin-bottom: 0.5rem;
+}
+
+.page-container.compact .subtitle {
+  font-size: 1.1rem;
+  margin-bottom: 2rem;
+}
+
+.page-container.compact .recent-calls {
+  margin-top: 2.5rem;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

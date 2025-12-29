@@ -5,6 +5,7 @@ import { useWebRTC } from '../contexts/WebRTCContext';
 import { useToast } from '../contexts/ToastContext';
 import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, AlertCircle } from 'lucide-react';
 import QRCode from 'react-qr-code';
+import { saveCall } from '../utils/callHistory';
 
 const CallRoom: React.FC = () => {
     const { roomId } = useParams<{ roomId: string }>();
@@ -51,7 +52,7 @@ const CallRoom: React.FC = () => {
         };
         const exitFullscreen = document.exitFullscreen || doc.webkitExitFullscreen || doc.msExitFullscreen;
         if (exitFullscreen && document.fullscreenElement) {
-            exitFullscreen.call(document).catch(() => {});
+            exitFullscreen.call(document).catch(() => { });
         }
     };
 
@@ -97,6 +98,8 @@ const CallRoom: React.FC = () => {
         };
     }, [stopLocalMedia]);
 
+    const callStartTimeRef = useRef<number | null>(null);
+
     const handleJoin = async () => {
         if (!roomId) return;
         try {
@@ -111,7 +114,7 @@ const CallRoom: React.FC = () => {
                     rootElement.webkitRequestFullscreen ||
                     rootElement.msRequestFullscreen;
                 if (requestFullscreen) {
-                    requestFullscreen.call(rootElement).catch(() => {});
+                    requestFullscreen.call(rootElement).catch(() => { });
                 }
             }
             await startLocalMedia();
@@ -119,6 +122,7 @@ const CallRoom: React.FC = () => {
             setTimeout(() => {
                 joinRoom(roomId);
                 setHasJoined(true);
+                callStartTimeRef.current = Date.now();
             }, 50);
         } catch (err) {
             console.error("Failed to join room", err);
@@ -135,11 +139,34 @@ const CallRoom: React.FC = () => {
     }, [signalingError, hasJoined, roomState, stopLocalMedia]);
 
     const handleLeave = () => {
+        if (callStartTimeRef.current && roomId) {
+            const duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
+            saveCall({
+                roomId,
+                startTime: callStartTimeRef.current,
+                duration: duration > 0 ? duration : 0
+            });
+            callStartTimeRef.current = null;
+        }
         leaveRoom();
         stopLocalMedia();
         exitFullscreenIfActive();
         navigate('/');
     };
+
+    // Also handle cleanup on unmount to save call history if user closes tab/navigates back
+    useEffect(() => {
+        return () => {
+            if (callStartTimeRef.current && roomId) {
+                const duration = Math.floor((Date.now() - callStartTimeRef.current) / 1000);
+                saveCall({
+                    roomId,
+                    startTime: callStartTimeRef.current,
+                    duration: duration > 0 ? duration : 0
+                });
+            }
+        };
+    }, [roomId]);
 
     const scheduleIdleHide = () => {
         if (idleTimeoutRef.current) {

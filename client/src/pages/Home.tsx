@@ -1,10 +1,18 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Video } from 'lucide-react';
+import RecentCalls from '../components/RecentCalls';
+import { getRecentCalls } from '../utils/callHistory';
+import type { RecentCall } from '../utils/callHistory';
 
 const Home: React.FC = () => {
     const navigate = useNavigate();
+    const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
+
+    useEffect(() => {
+        setRecentCalls(getRecentCalls());
+    }, []);
 
     const startCall = () => {
         const roomId = uuidv4();
@@ -12,7 +20,7 @@ const Home: React.FC = () => {
     };
 
     return (
-        <div className="page-container center-content">
+        <div className={`page-container center-content ${recentCalls.length > 0 ? 'compact' : ''}`}>
             <div className="home-content">
                 <h1 className="title">Connected</h1>
                 <p className="subtitle">
@@ -24,6 +32,8 @@ const Home: React.FC = () => {
                     <Video className="icon" />
                     Start Call
                 </button>
+
+                <RecentCalls calls={recentCalls} />
             </div>
         </div>
     );
