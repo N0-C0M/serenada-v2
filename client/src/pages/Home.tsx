@@ -9,9 +9,30 @@ import type { RecentCall } from '../utils/callHistory';
 const Home: React.FC = () => {
     const navigate = useNavigate();
     const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
+    const [roomStatuses, setRoomStatuses] = useState<Record<string, number>>({});
 
     useEffect(() => {
-        setRecentCalls(getRecentCalls());
+        const calls = getRecentCalls();
+        setRecentCalls(calls);
+
+        if (calls.length > 0) {
+            const fetchStatuses = async () => {
+                try {
+                    const rids = calls.map(c => `rids=${c.roomId}`).join('&');
+                    const response = await fetch(`/api/rooms/status?${rids}`);
+                    if (response.ok) {
+                        const data = await response.json();
+                        setRoomStatuses(data);
+                    }
+                } catch (error) {
+                    console.error('Failed to fetch room statuses:', error);
+                }
+            };
+
+            fetchStatuses();
+            const interval = setInterval(fetchStatuses, 15000); // Poll every 15s
+            return () => clearInterval(interval);
+        }
     }, []);
 
     const startCall = () => {
@@ -33,7 +54,7 @@ const Home: React.FC = () => {
                     Start Call
                 </button>
 
-                <RecentCalls calls={recentCalls} />
+                <RecentCalls calls={recentCalls} roomStatuses={roomStatuses} />
             </div>
         </div>
     );

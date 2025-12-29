@@ -5,9 +5,10 @@ import type { RecentCall } from '../utils/callHistory';
 
 interface RecentCallsProps {
     calls: RecentCall[];
+    roomStatuses: Record<string, number>;
 }
 
-const RecentCalls: React.FC<RecentCallsProps> = ({ calls }) => {
+const RecentCalls: React.FC<RecentCallsProps> = ({ calls, roomStatuses }) => {
     const navigate = useNavigate();
 
     const formatDuration = (seconds: number) => {
@@ -25,6 +26,18 @@ const RecentCalls: React.FC<RecentCallsProps> = ({ calls }) => {
     const formatTime = (timestamp: number) => {
         const date = new Date(timestamp);
         return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    const renderStatusDot = (roomId: string) => {
+        const count = roomStatuses[roomId] || 0;
+        if (count === 0) return null;
+
+        const statusClass = count === 1 ? 'status-waiting' : 'status-full';
+        const title = count === 1 ? 'Someone is waiting' : 'Room is full';
+
+        return (
+            <div className={`status-dot ${statusClass}`} title={title} />
+        );
     };
 
     if (calls.length === 0) return null;
@@ -49,6 +62,7 @@ const RecentCalls: React.FC<RecentCallsProps> = ({ calls }) => {
                             >
                                 <td>
                                     <div className="recent-call-date-cell">
+                                        {renderStatusDot(call.roomId)}
                                         <Calendar size={14} className="recent-call-icon" />
                                         <span>{formatDate(call.startTime)} at {formatTime(call.startTime)}</span>
                                     </div>

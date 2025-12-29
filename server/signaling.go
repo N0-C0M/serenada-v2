@@ -538,3 +538,27 @@ func generateID(prefix string) string {
 	rand.Read(b)
 	return prefix + hex.EncodeToString(b)
 }
+
+func (h *Hub) handleRoomStatus(w http.ResponseWriter, r *http.Request) {
+	rids := r.URL.Query()["rids"]
+	if len(rids) == 0 {
+		json.NewEncoder(w).Encode(map[string]int{})
+		return
+	}
+
+	status := make(map[string]int)
+	h.mu.RLock()
+	for _, rid := range rids {
+		if room, ok := h.rooms[rid]; ok {
+			room.mu.Lock()
+			status[rid] = len(room.Participants)
+			room.mu.Unlock()
+		} else {
+			status[rid] = 0
+		}
+	}
+	h.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(status)
+}
