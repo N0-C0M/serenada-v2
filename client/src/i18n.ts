@@ -107,6 +107,10 @@ i18n
     .init({
         resources,
         fallbackLng: 'en',
+        detection: {
+            order: ['querystring', 'navigator'],
+            caches: []
+        },
         interpolation: {
             escapeValue: false
         }
