@@ -171,7 +171,9 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         if (roomState && roomState.participants && roomState.participants.length === 2 && roomState.hostCid === clientId) {
             // ... (existing logic)
             const pc = getOrCreatePC();
-            if (pc.signalingState === 'stable') {
+            // Only initiate offer if we haven't established a connection yet (no remote description)
+            // This prevents infinite negotiation loops when room_state updates occur
+            if (pc.signalingState === 'stable' && !pc.remoteDescription) {
                 createOffer();
             }
         } else if (roomState && roomState.participants && roomState.participants.length < 2) {
@@ -210,8 +212,19 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         pc.ontrack = (event) => {
             console.log('Remote track received', event.streams);
             if (event.streams && event.streams[0]) {
-                setRemoteStream(event.streams[0]);
+                const stream = event.streams[0];
+                console.log(`[WebRTC] Stream active: ${stream.active}`);
+                stream.getTracks().forEach(t => console.log(`[WebRTC] Track ${t.kind}: enabled=${t.enabled}, muted=${t.muted}, state=${t.readyState}`));
+                setRemoteStream(stream);
             }
+        };
+
+        pc.oniceconnectionstatechange = () => {
+            console.log(`[WebRTC] ICE Connection State: ${pc.iceConnectionState}`);
+        };
+
+        pc.onconnectionstatechange = () => {
+            console.log(`[WebRTC] Connection State: ${pc.connectionState}`);
         };
 
         pc.onicecandidate = (event) => {
