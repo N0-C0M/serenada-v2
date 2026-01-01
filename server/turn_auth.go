@@ -98,9 +98,10 @@ func handleTurnCredentials(store *TurnTokenStore) http.HandlerFunc {
 
 		// 1. Get Secret and Host from Env
 		secret := os.Getenv("TURN_SECRET")
-		host := os.Getenv("TURN_HOST")
-		if secret == "" || host == "" {
-			http.Error(w, "TURN not configured", http.StatusServiceUnavailable)
+		turn_host := os.Getenv("TURN_HOST")
+		stun_host := os.Getenv("STUN_HOST")
+		if secret == "" || stun_host == "" {
+			http.Error(w, "STUN not configured", http.StatusServiceUnavailable)
 			return
 		}
 
@@ -119,11 +120,14 @@ func handleTurnCredentials(store *TurnTokenStore) http.HandlerFunc {
 			Username: username,
 			Password: password,
 			URIs: []string{
-				"stun:" + host,
-				"turn:" + host,
-				"turns:" + host + ":5349?transport=tcp",
+				"stun:" + stun_host,
+				"turn:" + stun_host,
 			},
 			TTL: ttl,
+		}
+
+		if turn_host != "" {
+			config.URIs = append(config.URIs, "turns:"+turn_host+":443?transport=tcp")
 		}
 
 		w.Header().Set("Content-Type", "application/json")
