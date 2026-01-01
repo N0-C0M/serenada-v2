@@ -13,11 +13,18 @@ echo "📦 Building frontend..."
 
 # 2. Sync files to VPS
 echo "📤 Syncing files to VPS..."
-rsync -avz --exclude '.git' \
-           --exclude 'client/node_modules' \
-           --exclude 'client/src' \
-           --exclude 'client/public' \
-           ./ "$VPS_HOST:$REMOTE_DIR/"
+# Use -R to create relative paths on destination (e.g. client/dist/ -> /opt/connected/client/dist/)
+rsync -avzR \
+    --exclude 'server/server' \
+    --exclude 'server/server_test' \
+    docker-compose.yml \
+    docker-compose.prod.yml \
+    .env.production \
+    server/ \
+    client/dist/ \
+    nginx/ \
+    coturn/ \
+    "$VPS_HOST:$REMOTE_DIR/"
 
 # 3. Copy production env file and restart services
 echo "🔄 Restarting production services..."
