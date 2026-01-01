@@ -12,6 +12,7 @@ interface WebRTCContextValue {
     startLocalMedia: () => Promise<void>;
     stopLocalMedia: () => void;
     flipCamera: () => Promise<void>;
+    facingMode: 'user' | 'environment';
     hasMultipleCameras: boolean;
     peerConnection: RTCPeerConnection | null;
 }
@@ -448,8 +449,9 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
             remoteStream,
             startLocalMedia,
             stopLocalMedia,
-            flipCamera,
-            hasMultipleCameras,
+            flipCamera: flipCamera,
+            facingMode: facingMode,
+            hasMultipleCameras: hasMultipleCameras,
             peerConnection: pcRef.current
         }}>
             {children}

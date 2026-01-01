@@ -181,7 +181,6 @@ body {
   height: 100%;
   z-index: 1;
   background: black;
-  transition: all 0.25s ease;
 }
 
 @media (min-width: 768px) {

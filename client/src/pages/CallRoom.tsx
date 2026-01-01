@@ -26,6 +26,7 @@ const CallRoom: React.FC = () => {
         startLocalMedia,
         stopLocalMedia,
         flipCamera,
+        facingMode,
         hasMultipleCameras,
         localStream,
         remoteStream
@@ -37,6 +38,15 @@ const CallRoom: React.FC = () => {
     const [isCameraOff, setIsCameraOff] = useState(false);
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const [isLocalLarge, setIsLocalLarge] = useState(false);
+    const lastFacingModeRef = useRef(facingMode);
+
+    // Auto-swap videos based on camera facing mode
+    useEffect(() => {
+        if (facingMode !== lastFacingModeRef.current) {
+            setIsLocalLarge(facingMode === 'environment');
+            lastFacingModeRef.current = facingMode;
+        }
+    }, [facingMode]);
 
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
@@ -289,7 +299,10 @@ const CallRoom: React.FC = () => {
             {/* Primary Video (Full Screen) */}
             <div
                 className={`video-remote-container ${isLocalLarge ? 'pip' : 'primary'}`}
-                onClick={isLocalLarge ? () => setIsLocalLarge(false) : undefined}
+                onPointerUp={isLocalLarge ? (e) => {
+                    e.stopPropagation();
+                    setIsLocalLarge(false);
+                } : undefined}
             >
                 <video
                     ref={remoteVideoRef}
@@ -324,7 +337,10 @@ const CallRoom: React.FC = () => {
             {/* PIP Video (Thumbnail) */}
             <div
                 className={`video-local-container ${isLocalLarge ? 'primary' : 'pip'}`}
-                onClick={!isLocalLarge ? () => setIsLocalLarge(true) : undefined}
+                onPointerUp={!isLocalLarge ? (e) => {
+                    e.stopPropagation();
+                    setIsLocalLarge(true);
+                } : undefined}
             >
                 <video
                     ref={localVideoRef}
