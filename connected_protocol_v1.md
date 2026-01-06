@@ -132,13 +132,22 @@ Acknowledges join success and provides room state.
     "participants": [
       { "cid": "C-a1b2...", "joinedAt": 1735171200000 },
       { "cid": "C-c3d4...", "joinedAt": 1735171215000 }
-    ]
+    ],
+    "turnToken": "T-abc123yz...",
+    "turnTokenExpiresAt": 1735174800
   }
 }
 ```
 
+**Fields in payload**
+- `hostCid` *(string)*: client ID of the current host.
+- `participants` *(array)*: list of current participants.
+- `turnToken` *(string, optional)*: temporary token for fetching TURN credentials from `/api/turn-credentials`. Only present on successful join.
+- `turnTokenExpiresAt` *(number, optional)*: unix timestamp (seconds) when the token expires.
+
 **Client behavior**
-- Store `sid` and `cid`.
+- Store `sid`, `cid`, and `turnToken`.
+- Immediately fetch ICE servers using the `turnToken` via `X-Turn-Token` header.
 - If another participant is already present, proceed to WebRTC negotiation using the rules in section 5.
 
 ---
@@ -497,6 +506,7 @@ For `offer`, `answer`, `ice`:
 ## 8. Security requirements (MVP)
 
 - **HTTPS/WSS only**.
+- **TURN Gating**: TURN tokens are only issued in the `joined` message after successful `rid` validation, preventing unauthorized use of the TURN relay by unauthenticated clients.
 - Rate limit:
   - new WebSocket connections per IP
   - `join` attempts per IP/room
