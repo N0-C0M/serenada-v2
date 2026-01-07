@@ -1,12 +1,36 @@
-worker_processes 1;
+worker_processes auto;
 
-events { worker_connections 1024; }
+events {
+    worker_connections 1024;
+    multi_accept on;
+}
 
 http {
     include       mime.types;
     default_type  application/octet-stream;
     sendfile        on;
+    tcp_nopush      on;
+    tcp_nodelay     on;
     keepalive_timeout  65;
+    types_hash_max_size 2048;
+    client_max_body_size 16M;
+
+    # Buffer settings
+    client_body_buffer_size 128k;
+    client_header_buffer_size 1k;
+    large_client_header_buffers 4 4k;
+    output_buffers 1 32k;
+    postpone_output 1460;
+
+    # Gzip Settings
+    gzip on;
+    gzip_disable "msie6";
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_buffers 16 8k;
+    gzip_http_version 1.1;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript image/svg+xml;
 
     map $request_uri $log_request_uri {
         ~^(/call/)[^/?]+(.*)$ $1[redacted]$2;
@@ -38,6 +62,17 @@ http {
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_ciphers HIGH:!aNULL:!MD5;
         ssl_prefer_server_ciphers on;
+
+        # SSL session caching
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 1d;
+        ssl_session_tickets off;
+
+        # OCSP Stapling
+        ssl_stapling on;
+        ssl_stapling_verify on;
+        resolver 8.8.8.8 8.8.4.4 valid=300s;
+        resolver_timeout 5s;
 
         add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
         add_header X-Content-Type-Options "nosniff" always;
