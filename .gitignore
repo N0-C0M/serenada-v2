@@ -3,6 +3,9 @@
 .env.production
 .env.local
 
+# Temp files
+nginx/nginx.prod.conf
+
 # Node
 node_modules/
 dist/
