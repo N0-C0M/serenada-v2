@@ -8,25 +8,50 @@ A simple, privacy-focused 1:1 video calling application built with WebRTC. No ac
 
 - **Instant calls** – One tap to start, share a link to connect
 - **No accounts required** – Just open and call
-- **Privacy-first** – No tracking, no analytics, peer-to-peer video
+- **Privacy-first** – No tracking, no analytics, end-to-end encrypted peer-to-peer video
 - **Mobile-friendly** – Works on Android Chrome, iOS Safari, and desktop browsers
 - **Self-hostable** – Run your own instance with full control
 
 ## Quick Start
 
-### Local Development
+### Local Development (Docker)
 
 1. Copy the environment template:
    ```bash
    cp .env.example .env
    ```
 
-2. Start the development stack:
+2. Build the frontend:
    ```bash
-   docker-compose up -d --build
+   cd client
+   npm install
+   npm run build
    ```
 
-3. Open http://localhost in your browser
+3. Start the development stack:
+   ```bash
+   docker compose up -d --build
+   ```
+
+4. Open http://localhost in your browser
+
+### Manual Setup (No Docker)
+
+If you prefer to run the components manually:
+
+#### 1. Frontend (Client)
+```bash
+cd client
+npm install
+npm run dev
+```
+
+#### 2. Backend (Server)
+```bash
+cd server
+go run .
+```
+Requires Go 1.21+ and a `.env` file in the root directory.
 
 ### Production Deployment
 

@@ -23,23 +23,25 @@ The app will be accessible at `http://localhost`. It uses `nginx/nginx.dev.conf`
 ### 1. Configuration
 
 #### Environment Variables
-The repository includes a [.env.example](file:///Users/alexeygavrilov/Developer/src/connected/.env.example) template. Create your local environment file by copying it:
+The repository includes an [.env.example](.env.example) template. Create your production environment file:
 
 ```bash
-cp .env.example .env
+cp .env.example .env.production
 ```
 
-Note: `.env` and `.env.production` are ignored by git to protect your secrets.
+Edit `.env.production` and set the following required variables:
+- `VPS_HOST`: SSH connection string (e.g., `root@1.2.3.4`)
+- `DOMAIN`: Your app domain (e.g., `serenada.app`)
+- `REMOTE_DIR`: Deployment path on VPS (e.g., `/opt/serenada`)
+- `IPV4`: VPS Public IPv4 address
+- `IPV6`: VPS Public IPv6 address
+- `TURN_SECRET`: Secure secret for TURN (generate with `openssl rand -hex 32`)
+- `ROOM_ID_SECRET`: Secure secret for Room IDs (generate with `openssl rand -hex 32`)
 
-```bash
-TURN_HOST=serenada.app
-# Generate a secure secret: openssl rand -hex 32
-TURN_SECRET=your_secure_random_secret
-```
-
-#### Nginx & Coturn
-- Production Nginx config: [nginx.prod.conf](file:///Users/alexeygavrilov/Developer/src/connected/nginx/nginx.prod.conf)
-- Production Coturn config: [turnserver.prod.conf](file:///Users/alexeygavrilov/Developer/src/connected/coturn/turnserver.prod.conf)
+#### Configuration Templates
+Serenada uses templates to generate final configuration files during deployment. This ensures that domain names and IP addresses are consistently applied across all services.
+- [nginx.prod.conf.template](nginx/nginx.prod.conf.template)
+- [turnserver.prod.conf.template](coturn/turnserver.prod.conf.template)
 
 ### 2. Firewall
 
@@ -47,35 +49,35 @@ Ensure the following ports are open on your VPS firewall (e.g., UFW or Hetzner C
 -   **80/tcp** (HTTP)
 -   **443/tcp** (HTTPS)
 -   **3478/udp & tcp** (STUN/TURN Signaling)
+-   **5349/tcp** (STUN/TURN over TLS)
 -   **49152-65535/udp** (WebRTC Media Range)
 
 ### 3. HTTPS (SSL) Setup
+
+Serenada expects Let's Encrypt certificates to be located at `/etc/letsencrypt/live/${DOMAIN}/`.
 
 1.  Stop Nginx if running: `docker stop serenada-nginx`
 2.  Install Certbot and generate certificates:
     ```bash
     sudo apt install certbot
-    sudo certbot certonly --standalone -d serenada.app
+    sudo certbot certonly --standalone -d your-domain.com
     ```
-3.  The certificates are mounted into the Nginx container via `docker-compose.prod.yml`.
+3.  The certificates are mounted into the containers via `docker-compose.prod.yml`.
 
 ### 4. Deploying the Stack
 
-A convenience script is provided for deployment. From the project root:
+A convenience script is provided for deployment. It uses `envsubst` to process templates, builds the frontend, syncs files via `rsync`, and restarts services via SSH.
 
+From the project root on your local machine:
 ```bash
 ./deploy.sh
 ```
 
-This will build the frontend, sync files to the VPS, and restart all services.
-
-**Manual alternative:**
-```bash
-docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
-```
+### 5. Advanced: Legacy Redirects
+If you need to support redirects from old domains (e.g. `connected.dowhile.fun`), you can create a template at `nginx/nginx.legacy.conf.template`. The deployment script will automatically generate an `extra` configuration for Nginx if this file exists.
 
 ## Verification
 
-1.  Navigate to `https://serenada.app`.
+1.  Navigate to `https://your-domain.com`.
 2.  Verify camera/microphone permissions are requested.
 3.  Check logs if issues arise: `docker compose logs -f`.

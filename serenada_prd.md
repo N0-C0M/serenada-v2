@@ -207,7 +207,9 @@ Required due to browser permission and autoplay constraints.
   - Starts a new session if no one is connected
 
 **Room retention (MVP)**
-- Rooms expire after a fixed inactivity period (e.g., 14 days)
+- Room IDs are stateless HMAC tokens and do not "expire" on the server.
+- The room link remains valid indefinitely for rejoining.
+- Server-side room session state exists only while participants are connected.
 
 ---
 

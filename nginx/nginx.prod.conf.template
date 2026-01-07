@@ -22,17 +22,17 @@ http {
     server {
         listen 80;
         listen [::]:80;
-        server_name serenada.app;
+        server_name ${DOMAIN};
         return 301 https://$host$request_uri;
     }
 
     server {
         listen 443 ssl http2;
         listen [::]:443 ssl http2;
-        server_name serenada.app;
+        server_name ${DOMAIN};
 
-        ssl_certificate /etc/letsencrypt/live/serenada.app/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/serenada.app/privkey.pem;
+        ssl_certificate /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
 
         # Modern SSL configuration
         ssl_protocols TLSv1.2 TLSv1.3;

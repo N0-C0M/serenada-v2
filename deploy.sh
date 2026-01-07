@@ -1,22 +1,47 @@
 #!/bin/bash
 set -e
 
-# Configuration
-VPS_HOST="root@46.224.118.74"
-REMOTE_DIR="/opt/serenada"
+# Load configuration from .env.production
+if [ -f .env.production ]; then
+    export $(grep -v '^#' .env.production | xargs)
+else
+    echo "❌ .env.production not found. Please create it from .env.example."
+    exit 1
+fi
 
-echo "🚀 Starting production deployment..."
+# Validate required variables
+REQUIRED_VARS=("VPS_HOST" "DOMAIN" "REMOTE_DIR" "IPV4" "IPV6")
+for var in "${REQUIRED_VARS[@]}"; do
+    if [ -z "${!var}" ]; then
+        echo "❌ Error: $var is not set in .env.production"
+        exit 1
+    fi
+done
+
+echo "🚀 Starting production deployment for $DOMAIN..."
 
 # 1. Build the frontend
 echo "📦 Building frontend..."
 (cd client && npm run build)
 
-# 2. Sync files to VPS
+# 2. Generate configuration files from templates
+echo "⚙️ Generating configuration files..."
+export DOMAIN IPV4 IPV6 REMOTE_DIR
+envsubst '$DOMAIN $IPV4 $IPV6 $REMOTE_DIR' < nginx/nginx.prod.conf.template > nginx/nginx.prod.conf
+envsubst '$DOMAIN $IPV4 $IPV6 $REMOTE_DIR' < coturn/turnserver.prod.conf.template > coturn/turnserver.prod.conf
+
+# Optional: Legacy redirects
+if [ -f nginx/nginx.legacy.conf.template ]; then
+    mkdir -p nginx/conf.d
+    envsubst '$DOMAIN' < nginx/nginx.legacy.conf.template > nginx/conf.d/legacy.extra
+fi
+
+# 3. Sync files to VPS
 echo "📤 Syncing files to VPS..."
-# Use -R to create relative paths on destination (e.g. client/dist/ -> /opt/connected/client/dist/)
 rsync -avzR \
     --exclude 'server/server' \
     --exclude 'server/server_test' \
+    --exclude '*.template' \
     docker-compose.yml \
     docker-compose.prod.yml \
     .env.production \
@@ -26,18 +51,18 @@ rsync -avzR \
     coturn/ \
     "$VPS_HOST:$REMOTE_DIR/"
 
-# 3. Copy production env file and restart services
+# 4. Copy production env file and restart services
 echo "🔄 Restarting production services..."
 ssh "$VPS_HOST" "cd $REMOTE_DIR && \
     cp .env.production .env && \
     docker compose -f docker-compose.yml -f docker-compose.prod.yml down && \
     docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build"
 
-# 4. Verify deployment
+# 5. Verify deployment
 echo "✅ Verifying deployment..."
 sleep 3
 ssh "$VPS_HOST" "docker ps"
-curl -sI https://serenada.app | head -n 1
+curl -sI "https://$DOMAIN" | head -n 1
 
 echo ""
-echo "🎉 Deployment complete! App is live at https://serenada.app"
+echo "🎉 Deployment complete! App is live at https://$DOMAIN"
