@@ -39,6 +39,7 @@ const CallRoom: React.FC = () => {
     const [areControlsVisible, setAreControlsVisible] = useState(true);
     const [isLocalLarge, setIsLocalLarge] = useState(false);
     const [remoteVideoFit, setRemoteVideoFit] = useState<'cover' | 'contain'>('cover');
+    const [showConnectionError, setShowConnectionError] = useState(false);
     const lastFacingModeRef = useRef(facingMode);
 
     // Auto-swap videos based on camera facing mode
@@ -52,6 +53,7 @@ const CallRoom: React.FC = () => {
     const localVideoRef = useRef<HTMLVideoElement>(null);
     const remoteVideoRef = useRef<HTMLVideoElement>(null);
     const idleTimeoutRef = useRef<number | null>(null);
+    const connectionTimeoutRef = useRef<number | null>(null);
 
     const isMobileDevice = () => {
         if (typeof window === 'undefined') return false;
@@ -105,6 +107,33 @@ const CallRoom: React.FC = () => {
             });
         }
     }, [hasJoined, isConnected, startLocalMedia]);
+
+    useEffect(() => {
+        if (isConnected || signalingError) {
+            if (connectionTimeoutRef.current) {
+                window.clearTimeout(connectionTimeoutRef.current);
+                connectionTimeoutRef.current = null;
+            }
+            setShowConnectionError(false);
+            return;
+        }
+
+        if (connectionTimeoutRef.current) return;
+
+        connectionTimeoutRef.current = window.setTimeout(() => {
+            connectionTimeoutRef.current = null;
+            if (!isConnected) {
+                setShowConnectionError(true);
+            }
+        }, 8000);
+
+        return () => {
+            if (connectionTimeoutRef.current) {
+                window.clearTimeout(connectionTimeoutRef.current);
+                connectionTimeoutRef.current = null;
+            }
+        };
+    }, [isConnected, signalingError]);
 
     // Separate effect for cleanup on unmount only - not on state changes
     useEffect(() => {
@@ -258,15 +287,17 @@ const CallRoom: React.FC = () => {
 
     // Render Pre-Join
     if (!hasJoined) {
+        const connectionErrorMessage = signalingError || (showConnectionError ? t('ws_connect_error') : null);
+
         return (
             <div className="page-container center-content">
                 <div className="card">
                     <h2>{t('ready_to_join')}</h2>
                     <p>{t('room_id')} {roomId}</p>
-                    {signalingError && (
+                    {connectionErrorMessage && (
                         <div className="error-message">
                             <AlertCircle size={20} />
-                            {signalingError}
+                            {connectionErrorMessage}
                         </div>
                     )}
                     <div className="video-preview-container">
