@@ -46,11 +46,10 @@ type Participant struct {
 }
 
 type Hub struct {
-	rooms      map[string]*Room
-	watchers   map[string]map[*Client]bool // roomID -> set of clients
-	mu         sync.RWMutex
-	clients    map[*Client]bool
-	turnTokens *TurnTokenStore
+	rooms    map[string]*Room
+	watchers map[string]map[*Client]bool // roomID -> set of clients
+	mu       sync.RWMutex
+	clients  map[*Client]bool
 }
 
 type Room struct {
@@ -70,12 +69,11 @@ type Client struct {
 	ip   string
 }
 
-func newHub(turnTokens *TurnTokenStore) *Hub {
+func newHub() *Hub {
 	return &Hub{
-		rooms:      make(map[string]*Room),
-		watchers:   make(map[string]map[*Client]bool),
-		clients:    make(map[*Client]bool),
-		turnTokens: turnTokens,
+		rooms:    make(map[string]*Room),
+		watchers: make(map[string]map[*Client]bool),
+		clients:  make(map[*Client]bool),
 	}
 }
 
@@ -328,8 +326,10 @@ func (h *Hub) handleJoin(c *Client, msg Message) {
 	}
 
 	// Include TURN token in joined response (gated by valid room ID)
-	if h.turnTokens != nil {
-		token, expiresAt := h.turnTokens.Issue(c.ip)
+	token, expiresAt, err := issueTurnToken(c.ip, 5*time.Minute, turnTokenKindCall)
+	if err != nil {
+		log.Printf("[TURN] Failed to issue token: %v", err)
+	} else {
 		payload["turnToken"] = token
 		payload["turnTokenExpiresAt"] = expiresAt.Unix()
 	}

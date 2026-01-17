@@ -14,11 +14,8 @@ func main() {
 	_ = godotenv.Load()
 	_ = godotenv.Load("../.env")
 
-	turnTokenStore := NewTurnTokenStore(5 * time.Minute)
-	diagnosticTokenStore := NewTurnTokenStore(5 * time.Second)
-
 	// Initialize signaling
-	hub := newHub(turnTokenStore)
+	hub := newHub()
 	go hub.run()
 
 	// Simple CORS middleware for API
@@ -57,8 +54,8 @@ func main() {
 		serveWs(hub, w, r)
 	}))
 
-	http.HandleFunc("/api/turn-credentials", rateLimitMiddleware(turnCredsLimiter, enableCors(handleTurnCredentials(turnTokenStore, diagnosticTokenStore))))
-	http.HandleFunc("/api/diagnostic-token", rateLimitMiddleware(diagnosticLimiter, enableCors(handleDiagnosticToken(diagnosticTokenStore))))
+	http.HandleFunc("/api/turn-credentials", rateLimitMiddleware(turnCredsLimiter, enableCors(handleTurnCredentials())))
+	http.HandleFunc("/api/diagnostic-token", rateLimitMiddleware(diagnosticLimiter, enableCors(handleDiagnosticToken())))
 	http.HandleFunc("/api/room-id", rateLimitMiddleware(roomIDLimiter, enableCors(handleRoomID())))
 
 	http.HandleFunc("/device-check", handleDeviceCheck)

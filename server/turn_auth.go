@@ -2,16 +2,15 @@ package main
 
 import (
 	"crypto/hmac"
-	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -22,89 +21,117 @@ type TurnConfig struct {
 	TTL      int      `json:"ttl"`
 }
 
-type turnToken struct {
-	ip      string
-	expires time.Time
+const (
+	turnTokenVersion        = 1
+	turnTokenKindCall       = "call"
+	turnTokenKindDiagnostic = "diagnostic"
+)
+
+type turnTokenClaims struct {
+	V    int    `json:"v"`
+	Kind string `json:"k"`
+	Exp  int64  `json:"exp"`
+	IP   string `json:"ip,omitempty"`
 }
 
-type TurnTokenStore struct {
-	mu          sync.Mutex
-	tokens      map[string]turnToken
-	ttl         time.Duration
-	lastCleanup time.Time
-}
-
-func NewTurnTokenStore(ttl time.Duration) *TurnTokenStore {
-	return &TurnTokenStore{
-		tokens:      make(map[string]turnToken),
-		ttl:         ttl,
-		lastCleanup: time.Now(),
+func getTurnTokenSecret() (string, error) {
+	secret := os.Getenv("TURN_TOKEN_SECRET")
+	if secret == "" {
+		secret = os.Getenv("TURN_SECRET")
 	}
+	if secret == "" {
+		return "", errors.New("TURN token secret not configured")
+	}
+	return secret, nil
 }
 
-func (s *TurnTokenStore) Issue(ip string) (string, time.Time) {
-	now := time.Now()
-	b := make([]byte, 16)
-	rand.Read(b)
-	token := hex.EncodeToString(b)
-	expires := now.Add(s.ttl)
-
-	s.mu.Lock()
-	if now.Sub(s.lastCleanup) >= s.ttl {
-		for t, entry := range s.tokens {
-			if now.After(entry.expires) {
-				delete(s.tokens, t)
-			}
-		}
-		s.lastCleanup = now
+func issueTurnToken(ip string, ttl time.Duration, kind string) (string, time.Time, error) {
+	secret, err := getTurnTokenSecret()
+	if err != nil {
+		return "", time.Time{}, err
 	}
-	s.tokens[token] = turnToken{ip: ip, expires: expires}
-	s.mu.Unlock()
 
-	return token, expires
+	expiresAt := time.Now().Add(ttl)
+	claims := turnTokenClaims{
+		V:    turnTokenVersion,
+		Kind: kind,
+		Exp:  expiresAt.Unix(),
+		IP:   ip,
+	}
+
+	payloadBytes, err := json.Marshal(claims)
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	payload := base64.RawURLEncoding.EncodeToString(payloadBytes)
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	sig := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	return payload + "." + sig, expiresAt, nil
 }
 
-func (s *TurnTokenStore) Validate(token, ip string) bool {
-	if token == "" {
-		return false
+func parseTurnToken(token string) (turnTokenClaims, bool) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 2 {
+		return turnTokenClaims{}, false
 	}
-	now := time.Now()
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return turnTokenClaims{}, false
+	}
 
-	entry, ok := s.tokens[token]
+	sigBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return turnTokenClaims{}, false
+	}
+
+	secret, err := getTurnTokenSecret()
+	if err != nil {
+		return turnTokenClaims{}, false
+	}
+
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(parts[0]))
+	expectedSig := mac.Sum(nil)
+	if !hmac.Equal(expectedSig, sigBytes) {
+		return turnTokenClaims{}, false
+	}
+
+	var claims turnTokenClaims
+	if err := json.Unmarshal(payloadBytes, &claims); err != nil {
+		return turnTokenClaims{}, false
+	}
+
+	return claims, true
+}
+
+func validateTurnToken(token, ip, kind string) bool {
+	claims, ok := parseTurnToken(token)
 	if !ok {
 		return false
 	}
-	if now.After(entry.expires) {
-		delete(s.tokens, token)
+	if claims.V != turnTokenVersion {
 		return false
 	}
-	if entry.ip != "" && entry.ip != ip {
+	if claims.Kind != kind {
+		return false
+	}
+	if time.Now().Unix() > claims.Exp {
+		return false
+	}
+	if claims.IP != "" && claims.IP != ip {
 		return false
 	}
 	return true
 }
 
-func (s *TurnTokenStore) Delete(token string) {
-	if token == "" {
-		return
-	}
-	s.mu.Lock()
-	delete(s.tokens, token)
-	s.mu.Unlock()
-}
-
-func handleTurnCredentials(store *TurnTokenStore, diagnosticStore *TurnTokenStore) http.HandlerFunc {
+func handleTurnCredentials() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		if store == nil && diagnosticStore == nil {
-			http.Error(w, "TURN token store unavailable", http.StatusServiceUnavailable)
 			return
 		}
 
@@ -118,12 +145,11 @@ func handleTurnCredentials(store *TurnTokenStore, diagnosticStore *TurnTokenStor
 		credentialTTL := 15 * 60 // default: 15 minutes
 		isAuthorized := false
 
-		if store != nil && store.Validate(token, clientIP) {
+		if validateTurnToken(token, clientIP, turnTokenKindCall) {
 			isAuthorized = true
-		} else if diagnosticStore != nil && diagnosticStore.Validate(token, clientIP) {
+		} else if validateTurnToken(token, clientIP, turnTokenKindDiagnostic) {
 			isAuthorized = true
 			credentialTTL = 5
-			diagnosticStore.Delete(token)
 		}
 
 		if !isAuthorized {
@@ -177,19 +203,19 @@ func handleTurnCredentials(store *TurnTokenStore, diagnosticStore *TurnTokenStor
 }
 
 // TODO: Remove this
-func handleDiagnosticToken(store *TurnTokenStore) http.HandlerFunc {
+func handleDiagnosticToken() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost && r.Method != http.MethodGet {
 			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		if store == nil {
-			http.Error(w, "TURN token store unavailable", http.StatusServiceUnavailable)
+		token, expires, err := issueTurnToken(getClientIP(r), 5*time.Second, turnTokenKindDiagnostic)
+		if err != nil {
+			http.Error(w, "TURN token unavailable", http.StatusServiceUnavailable)
 			return
 		}
 
-		token, expires := store.Issue(getClientIP(r))
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"token":   token,
