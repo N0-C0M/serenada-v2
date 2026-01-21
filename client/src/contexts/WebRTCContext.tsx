@@ -49,25 +49,26 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const roomStateRef = useRef(roomState);
     const clientIdRef = useRef(clientId);
 
+    const detectCameras = useCallback(async () => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const cameras = devices.filter(device => device.kind === 'videoinput');
+            setHasMultipleCameras(cameras.length > 1);
+        } catch (err) {
+            console.warn('[WebRTC] Failed to enumerate devices', err);
+        }
+    }, []);
+
     // Detect multiple cameras
     useEffect(() => {
-        const detectCameras = async () => {
-            if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
-            try {
-                const devices = await navigator.mediaDevices.enumerateDevices();
-                const cameras = devices.filter(device => device.kind === 'videoinput');
-                setHasMultipleCameras(cameras.length > 1);
-            } catch (err) {
-                console.warn('[WebRTC] Failed to enumerate devices', err);
-            }
-        };
         detectCameras();
         // Also listen for device changes
         navigator.mediaDevices?.addEventListener?.('devicechange', detectCameras);
         return () => {
             navigator.mediaDevices?.removeEventListener?.('devicechange', detectCameras);
         };
-    }, []);
+    }, [detectCameras]);
 
     // Ensure media is stopped when the provider unmounts
     useEffect(() => {
@@ -416,6 +417,7 @@ export const WebRTCProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
             applySpeechTrackHints(stream);
             setLocalStream(stream);
+            await detectCameras();
             requestingMediaRef.current = false;
 
             if (pcRef.current) {
