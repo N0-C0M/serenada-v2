@@ -7,6 +7,7 @@ import { Mic, MicOff, Video, VideoOff, PhoneOff, Copy, AlertCircle, RotateCcw, M
 import QRCode from 'react-qr-code';
 import { saveCall } from '../utils/callHistory';
 import { useTranslation } from 'react-i18next';
+import { playJoinChime } from '../utils/audio';
 
 const CallRoom: React.FC = () => {
     const { t } = useTranslation();
@@ -46,6 +47,24 @@ const CallRoom: React.FC = () => {
     const [showReconnecting, setShowReconnecting] = useState(false);
     const [showWaiting, setShowWaiting] = useState(true);
     const lastFacingModeRef = useRef(facingMode);
+
+    // Track participant count to play chime on join
+    const prevParticipantsCountRef = useRef(0);
+
+    useEffect(() => {
+        if (!hasJoined || !roomState) {
+            prevParticipantsCountRef.current = 0;
+            return;
+        }
+
+        const currentCount = roomState.participants.length;
+        // If count increased and it's not the first time we joined (count > 1)
+        if (currentCount > prevParticipantsCountRef.current && prevParticipantsCountRef.current > 0 && currentCount > 1) {
+            console.log('[CallRoom] Playing join chime');
+            playJoinChime();
+        }
+        prevParticipantsCountRef.current = currentCount;
+    }, [roomState?.participants.length, hasJoined]);
 
     // Auto-swap videos based on camera facing mode
     useEffect(() => {
