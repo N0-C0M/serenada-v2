@@ -6,28 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
-	"net/http"
 	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
-// Constants
+const maxMessageSize = 65536 // 64KB
+
+type TransportKind string
+
 const (
-	writeWait      = 10 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 65536 // 64KB
+	TransportWS  TransportKind = "ws"
+	TransportSSE TransportKind = "sse"
 )
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin: func(r *http.Request) bool {
-		return isOriginAllowed(r)
-	},
-}
 
 // Protocol structures
 type Message struct {
@@ -46,10 +36,11 @@ type Participant struct {
 }
 
 type Hub struct {
-	rooms    map[string]*Room
-	watchers map[string]map[*Client]bool // roomID -> set of clients
-	mu       sync.RWMutex
-	clients  map[*Client]bool
+	rooms        map[string]*Room
+	watchers     map[string]map[*Client]bool // roomID -> set of clients
+	mu           sync.RWMutex
+	clients      map[*Client]bool
+	clientsBySID map[string]*Client
 }
 
 type Room struct {
@@ -60,101 +51,70 @@ type Room struct {
 }
 
 type Client struct {
-	hub  *Hub
-	conn *websocket.Conn
-	send chan []byte
-	sid  string
-	cid  string // assigned on join
-	rid  string // current room
-	ip   string
+	hub       *Hub
+	send      chan []byte
+	sid       string
+	cid       string // assigned on join
+	rid       string // current room
+	ip        string
+	replaced  bool
+	lastSeen  int64
+	transport TransportKind
 }
 
 func newHub() *Hub {
 	return &Hub{
-		rooms:    make(map[string]*Room),
-		watchers: make(map[string]map[*Client]bool),
-		clients:  make(map[*Client]bool),
+		rooms:        make(map[string]*Room),
+		watchers:     make(map[string]map[*Client]bool),
+		clients:      make(map[*Client]bool),
+		clientsBySID: make(map[string]*Client),
 	}
 }
 
-func (h *Hub) run() {
-	// Simple run loop if needed, for MVP we handle events directly
+func (h *Hub) registerClient(c *Client) {
+	h.mu.Lock()
+	h.clients[c] = true
+	h.clientsBySID[c.sid] = c
+	h.mu.Unlock()
 }
 
-func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-
-	ip := getClientIP(r)
-	sid := generateID("S-")
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), sid: sid, ip: ip}
-
-	hub.mu.Lock()
-	hub.clients[client] = true
-	hub.mu.Unlock()
-
-	go client.writePump()
-	go client.readPump()
+func (h *Hub) getClientBySID(sid string) *Client {
+	h.mu.RLock()
+	client := h.clientsBySID[sid]
+	h.mu.RUnlock()
+	return client
 }
 
-func (c *Client) readPump() {
-	defer func() {
-		c.hub.handleDisconnect(c)
-		c.conn.Close()
-	}()
-	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))
-	c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
-
-	for {
-		_, message, err := c.conn.ReadMessage()
-		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
-			}
-			break
-		}
-		c.hub.handleMessage(c, message)
-	}
-}
-
-func (c *Client) writePump() {
-	ticker := time.NewTicker(pingPeriod)
-	defer func() {
-		ticker.Stop()
-		c.conn.Close()
-	}()
-	for {
-		select {
-		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
-
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			w.Write(message)
-
-			// Coalescing disabled to prevent JSON parsing errors on client
-			// if multiple messages are sent in one frame.
-
-			if err := w.Close(); err != nil {
-				return
-			}
-		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				return
-			}
+func (h *Hub) replaceClient(oldClient, newClient *Client) {
+	h.mu.Lock()
+	delete(h.clients, oldClient)
+	h.clients[newClient] = true
+	h.clientsBySID[newClient.sid] = newClient
+	for _, clientSet := range h.watchers {
+		if clientSet[oldClient] {
+			delete(clientSet, oldClient)
+			clientSet[newClient] = true
 		}
 	}
+	h.mu.Unlock()
+
+	if oldClient.rid != "" {
+		h.mu.RLock()
+		room := h.rooms[oldClient.rid]
+		h.mu.RUnlock()
+		if room != nil {
+			room.mu.Lock()
+			if cid, ok := room.Participants[oldClient]; ok {
+				delete(room.Participants, oldClient)
+				room.Participants[newClient] = cid
+				newClient.cid = cid
+				newClient.rid = oldClient.rid
+			}
+			room.mu.Unlock()
+		}
+	}
+
+	oldClient.replaced = true
 }
 
 func (c *Client) sendMessage(msg interface{}) {
@@ -185,6 +145,8 @@ func (h *Hub) handleMessage(c *Client, msgBytes []byte) {
 	}
 
 	switch msg.Type {
+	case "ping":
+		return
 	case "join":
 		log.Printf("[JOIN] Client %s joining room %s", c.sid, msg.RID)
 		if c.rid != "" {
@@ -236,20 +198,40 @@ func (h *Hub) handleJoin(c *Client, msg Message) {
 	h.mu.Unlock()
 
 	room.mu.Lock()
-	// Checks...
-	if len(room.Participants) >= 2 {
-		// Room is full. Check for reconnection/ghost eviction.
-		// Parse payload for reconnectCid
-		var joinPayload struct {
-			ReconnectCID string `json:"reconnectCid"`
+	var joinPayload struct {
+		ReconnectCID string `json:"reconnectCid"`
+	}
+	if len(msg.Payload) > 0 {
+		if err := json.Unmarshal(msg.Payload, &joinPayload); err != nil {
+			log.Printf("[JOIN] Failed to parse payload: %v", err)
 		}
-		if len(msg.Payload) > 0 {
-			if err := json.Unmarshal(msg.Payload, &joinPayload); err != nil {
-				log.Printf("[JOIN] Failed to parse payload: %v", err)
+	}
+
+	reconnectCID := joinPayload.ReconnectCID
+	reusedCID := false
+
+	if reconnectCID != "" {
+		var ghostClient *Client
+		for client, cid := range room.Participants {
+			if cid == reconnectCID {
+				ghostClient = client
+				break
 			}
 		}
 
-		reconnectCID := joinPayload.ReconnectCID
+		if ghostClient != nil {
+			delete(room.Participants, ghostClient)
+			ghostClient.cid = ""
+			ghostClient.rid = ""
+			reusedCID = true
+			// Note: room.HostCID is intentionally left unchanged here so that
+			// the host assignment is preserved across reconnects via the
+			// reused client ID (reconnectCID).
+		}
+	}
+
+	// Checks...
+	if len(room.Participants) >= 2 {
 		evicted := false
 
 		if reconnectCID != "" {
@@ -302,6 +284,9 @@ func (h *Hub) handleJoin(c *Client, msg Message) {
 	}
 
 	cid := generateID("C-")
+	if reusedCID && reconnectCID != "" {
+		cid = reconnectCID
+	}
 	c.cid = cid
 	c.rid = rid
 	room.Participants[c] = cid
@@ -499,10 +484,11 @@ func (h *Hub) handleRelay(c *Client, msg Message) {
 	log.Printf("[RELAY] Client %s (CID: %s) relayed %s message to %d participants in room %s", c.sid, c.cid, msg.Type, relayedCount, c.rid)
 }
 
-func (h *Hub) handleDisconnect(c *Client) {
+func (h *Hub) disconnectClient(c *Client) {
 	log.Printf("[DISCONNECT] Client %s disconnected", c.sid)
 	h.mu.Lock()
 	delete(h.clients, c)
+	delete(h.clientsBySID, c.sid)
 	// Remove from all watchers
 	for rid, clientSet := range h.watchers {
 		delete(clientSet, c)

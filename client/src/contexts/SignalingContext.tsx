@@ -1,24 +1,14 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useToast } from './ToastContext';
-
-// Types (Protocol v1)
-export type RoomState = {
-    hostCid: string | null;
-    participants: { cid: string; joinedAt?: number }[];
-};
-
-export type SignalingMessage = {
-    v: number;
-    type: string;
-    rid?: string;
-    sid?: string;
-    cid?: string;
-    to?: string;
-    payload?: any;
-};
+import { createSignalingTransport } from './signaling/transports';
+import type { TransportKind } from './signaling/transports';
+import type { RoomState, SignalingMessage } from './signaling/types';
+import { getConfiguredTransportOrder, parseTransportOrder } from './signaling/transportConfig';
+import { useTranslation } from 'react-i18next';
 
 interface SignalingContextValue {
     isConnected: boolean;
+    activeTransport: TransportKind | null;
     clientId: string | null;
     roomState: RoomState | null;
     turnToken: string | null;
@@ -46,6 +36,7 @@ export const useSignaling = () => {
 
 export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [isConnected, setIsConnected] = useState(false);
+    const [activeTransport, setActiveTransport] = useState<TransportKind | null>(null);
     const [clientId, setClientId] = useState<string | null>(null);
     const [roomState, setRoomState] = useState<RoomState | null>(null);
     const [lastMessage, setLastMessage] = useState<SignalingMessage | null>(null);
@@ -53,24 +44,173 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const [roomStatuses, setRoomStatuses] = useState<Record<string, number>>({});
     const [turnToken, setTurnToken] = useState<string | null>(null);
     const { showToast } = useToast();
+    const { t } = useTranslation();
 
     const listenersRef = useRef<((msg: SignalingMessage) => void)[]>([]);
+    const isConnectedRef = useRef(false);
 
-    const wsRef = useRef<WebSocket | null>(null);
+    const transportRef = useRef<ReturnType<typeof createSignalingTransport> | null>(null);
+    const transportOrderRef = useRef<TransportKind[]>(getConfiguredTransportOrder());
+    const transportIndexRef = useRef(0);
+    const transportConnectedOnceRef = useRef<Record<TransportKind, boolean>>({ ws: false, sse: false });
+    const transportIdRef = useRef(0);
     const currentRoomIdRef = useRef<string | null>(null);
     const pendingJoinRef = useRef<string | null>(null);
     const clientIdRef = useRef<string | null>(null);
     const lastClientIdRef = useRef<string | null>(null);
+    const needsRejoinRef = useRef(false);
+    const reconnectStorageKey = 'serenada.reconnectCid';
+
+    const clearReconnectStorage = useCallback(() => {
+        try {
+            window.sessionStorage.removeItem(reconnectStorageKey);
+        } catch (err) {
+            console.warn('[Signaling] Failed to clear reconnectCid', err);
+        }
+    }, []);
 
     // Sync ref
     useEffect(() => {
         clientIdRef.current = clientId;
+        if (clientId) {
+            try {
+                window.sessionStorage.setItem(reconnectStorageKey, clientId);
+            } catch (err) {
+                console.warn('[Signaling] Failed to persist reconnectCid', err);
+            }
+        }
     }, [clientId]);
+
+    useEffect(() => {
+        try {
+            const stored = window.sessionStorage.getItem(reconnectStorageKey);
+            if (stored && !lastClientIdRef.current) {
+                lastClientIdRef.current = stored;
+            }
+        } catch (err) {
+            console.warn('[Signaling] Failed to load reconnectCid', err);
+        }
+    }, []);
+
+    useEffect(() => {
+        isConnectedRef.current = isConnected;
+    }, [isConnected]);
+
+
+    const handleIncomingMessage = useCallback((msg: SignalingMessage) => {
+        console.log('RX:', msg);
+
+        switch (msg.type) {
+            case 'joined':
+                if (msg.cid) setClientId(msg.cid);
+                if (msg.payload) {
+                    // In Go server we send "participants" and "hostCid" in payload for joined AND room_state
+                    setRoomState(msg.payload as RoomState);
+                    // TURN token is now included in joined response (gated by valid room ID)
+                    if (msg.payload.turnToken) {
+                        setTurnToken(msg.payload.turnToken as string);
+                    }
+                }
+                break;
+            case 'room_state':
+                if (msg.payload) {
+                    setRoomState(msg.payload as RoomState);
+                }
+                break;
+            case 'room_ended':
+                setRoomState(null);
+                currentRoomIdRef.current = null;
+                needsRejoinRef.current = false;
+                clearReconnectStorage();
+                // Optional: set some "ended" state to show UI
+                break;
+            case 'room_statuses':
+                if (msg.payload) {
+                    setRoomStatuses(prev => ({ ...prev, ...msg.payload }));
+                }
+                break;
+            case 'room_status_update':
+                if (msg.payload) {
+                    setRoomStatuses(prev => ({
+                        ...prev,
+                        [msg.payload.rid]: msg.payload.count
+                    }));
+                }
+                break;
+            case 'error':
+                if (msg.payload && msg.payload.message) {
+                    setError(msg.payload.message);
+                    showToast('error', msg.payload.message);
+                }
+                break;
+        }
+
+        setLastMessage(msg);
+        listenersRef.current.forEach(listener => listener(msg));
+    }, [clearReconnectStorage, showToast]);
+
+    const sendMessage = useCallback((type: string, payload?: any, to?: string) => {
+        if (transportRef.current && transportRef.current.isOpen()) {
+            const realMsg = {
+                v: 1,
+                type,
+                rid: currentRoomIdRef.current || undefined,
+                cid: clientIdRef.current || undefined,
+                to,
+                payload
+            };
+
+            console.log('TX:', realMsg);
+            transportRef.current.send(realMsg);
+        } else {
+            console.warn('Signaling transport not connected');
+        }
+    }, []);
+
+    useEffect(() => {
+        if (!isConnected) return;
+
+        const interval = window.setInterval(() => {
+            sendMessage('ping', { ts: Date.now() });
+        }, 12000);
+
+        return () => {
+            window.clearInterval(interval);
+        };
+    }, [isConnected, sendMessage]);
+
+    const joinRoom = useCallback((roomId: string) => {
+        console.log(`[Signaling] joinRoom call for ${roomId}`);
+        setError(null);
+        needsRejoinRef.current = false;
+        currentRoomIdRef.current = roomId;
+        currentRoomIdRef.current = roomId;
+        if (transportRef.current && transportRef.current.isOpen()) {
+            const payload: any = { capabilities: { trickleIce: true } };
+            // If we have a previous client ID, send it to help server evict ghosts
+            const reconnectCid = clientIdRef.current || lastClientIdRef.current;
+            if (reconnectCid) {
+                payload.reconnectCid = reconnectCid;
+            }
+            sendMessage('join', payload);
+        } else {
+            console.log('[Signaling] Transport not ready, buffering join');
+            pendingJoinRef.current = roomId;
+        }
+    }, [sendMessage]);
 
     useEffect(() => {
         const reconnectAttemptsRef = { current: 0 };
         let reconnectTimeout: number | null = null;
         let closedByUnmount = false;
+        const connectingRef = { current: false };
+        const params = new URLSearchParams(window.location.search);
+        const paramTransports = params.get('transports');
+        transportOrderRef.current = paramTransports
+            ? parseTransportOrder(paramTransports)
+            : getConfiguredTransportOrder();
+        transportIndexRef.current = 0;
+        transportConnectedOnceRef.current = { ws: false, sse: false };
 
         const clearReconnectTimeout = () => {
             if (reconnectTimeout !== null) {
@@ -92,169 +232,116 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             }, backoff);
         };
 
-        const connect = () => {
-            if (closedByUnmount) return;
-            // Prevent duplicate sockets if a reconnect is already in flight
-            if (wsRef.current && (wsRef.current.readyState === WebSocket.OPEN || wsRef.current.readyState === WebSocket.CONNECTING)) {
-                return;
-            }
-
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            // Allow configuring WS URL via environment variable for production (e.g. separate backend)
-            // Fallback to same-host:8080 for local development if not specified
-            const wsUrl = import.meta.env.VITE_WS_URL || `${protocol}//${window.location.host}/ws`;
-
-            const ws = new WebSocket(wsUrl);
-            wsRef.current = ws;
-
-            const handleDisconnect = (reason: string, err?: any) => {
-                if (closedByUnmount) return;
-                console.error(`[WS] Disconnected via ${reason}`, err);
-                setIsConnected(false);
-                // Keep lastClientIdRef for reconnection attempt
-                if (clientIdRef.current) {
-                    lastClientIdRef.current = clientIdRef.current;
-                }
-                setClientId(null);
-                setRoomState(null);
-                setTurnToken(null);
-                wsRef.current = null;
-                scheduleReconnect();
-            };
-
-            ws.onopen = () => {
-                console.log('WS Connected');
-                reconnectAttemptsRef.current = 0;
-                setIsConnected(true);
-                if (pendingJoinRef.current) {
-                    joinRoom(pendingJoinRef.current);
-                    pendingJoinRef.current = null;
-                } else if (currentRoomIdRef.current) {
-                    // If we lost the connection mid-call, automatically rejoin
-                    console.log(`[WS] Auto-rejoining room ${currentRoomIdRef.current}`);
-                    joinRoom(currentRoomIdRef.current);
-                }
-            };
-
-            ws.onclose = (evt) => {
-                handleDisconnect('close', evt);
-            };
-
-            ws.onerror = (err) => {
-                handleDisconnect('error', err);
-            };
-
-            ws.onmessage = (event) => {
-                try {
-                    const msg: SignalingMessage = JSON.parse(event.data);
-                    console.log('RX:', msg);
-
-                    switch (msg.type) {
-                        case 'joined':
-                            if (msg.cid) setClientId(msg.cid);
-                            if (msg.payload) {
-                                // In Go server we send "participants" and "hostCid" in payload for joined AND room_state
-                                setRoomState(msg.payload as RoomState);
-                                // TURN token is now included in joined response (gated by valid room ID)
-                                if (msg.payload.turnToken) {
-                                    setTurnToken(msg.payload.turnToken as string);
-                                }
-                            }
-                            break;
-                        case 'room_state':
-                            if (msg.payload) {
-                                setRoomState(msg.payload as RoomState);
-                            }
-                            break;
-                        case 'room_ended':
-                            setRoomState(null);
-                            currentRoomIdRef.current = null;
-                            // Optional: set some "ended" state to show UI
-                            break;
-                        case 'room_statuses':
-                            if (msg.payload) {
-                                setRoomStatuses(prev => ({ ...prev, ...msg.payload }));
-                            }
-                            break;
-                        case 'room_status_update':
-                            if (msg.payload) {
-                                setRoomStatuses(prev => ({
-                                    ...prev,
-                                    [msg.payload.rid]: msg.payload.count
-                                }));
-                            }
-                            break;
-                        case 'error':
-                            if (msg.payload && msg.payload.message) {
-                                setError(msg.payload.message);
-                                showToast('error', msg.payload.message);
-                            }
-                            break;
-                    }
-
-                    setLastMessage(msg);
-                    listenersRef.current.forEach(listener => listener(msg));
-                } catch (e) {
-                    console.error('Failed to parse message', e);
-                }
-            };
+        const shouldFallback = (kind: TransportKind, reason: string) => {
+            const order = transportOrderRef.current;
+            if (order.length <= 1) return false;
+            if (transportIndexRef.current >= order.length - 1) return false;
+            if (reason === 'unsupported' || reason === 'timeout') return true;
+            if (!transportConnectedOnceRef.current[kind]) return true;
+            return false;
         };
 
-        connect();
+        const tryNextTransport = (reason: string) => {
+            const order = transportOrderRef.current;
+            const nextIndex = transportIndexRef.current + 1;
+            if (nextIndex >= order.length) return false;
+            console.warn(`[Signaling] ${order[transportIndexRef.current]} failed (${reason}), trying ${order[nextIndex]}`);
+            showToast('info', t('toast_connection_fallback'));
+            reconnectAttemptsRef.current = 0;
+            connect(nextIndex);
+            return true;
+        };
+
+        const connect = (index?: number) => {
+            if (closedByUnmount) return;
+            if (connectingRef.current) return;
+
+            const order = transportOrderRef.current;
+            const targetIndex = index ?? transportIndexRef.current;
+            const targetKind = order[targetIndex];
+            if (!targetKind) return;
+            transportIndexRef.current = targetIndex;
+            connectingRef.current = true;
+
+            if (transportRef.current) {
+                transportRef.current.close();
+            }
+
+            const connectionId = transportIdRef.current + 1;
+            transportIdRef.current = connectionId;
+
+            const transport = createSignalingTransport(targetKind, {
+                onOpen: () => {
+                    if (connectionId !== transportIdRef.current) return;
+                    connectingRef.current = false;
+                    reconnectAttemptsRef.current = 0;
+                    const wasConnected = isConnectedRef.current;
+                    setIsConnected(true);
+                    setActiveTransport(targetKind);
+                    transportConnectedOnceRef.current[targetKind] = true;
+                    if (!wasConnected) {
+                        if (pendingJoinRef.current) {
+                            joinRoom(pendingJoinRef.current);
+                            pendingJoinRef.current = null;
+                        } else if (needsRejoinRef.current && currentRoomIdRef.current) {
+                            // If we lost the connection mid-call, automatically rejoin
+                            console.log(`[Signaling] Auto-rejoining room ${currentRoomIdRef.current}`);
+                            needsRejoinRef.current = false;
+                            joinRoom(currentRoomIdRef.current);
+                        }
+                    }
+                },
+                onClose: (reason, err) => {
+                    if (connectionId !== transportIdRef.current) return;
+                    connectingRef.current = false;
+                    if (closedByUnmount) return;
+                    console.error(`[Signaling] Disconnected via ${reason}`, err);
+                    setIsConnected(false);
+                    setActiveTransport(null);
+                    // Keep lastClientIdRef for reconnection attempt
+                    if (clientIdRef.current) {
+                        lastClientIdRef.current = clientIdRef.current;
+                    }
+                    transportRef.current = null;
+                    needsRejoinRef.current = !!currentRoomIdRef.current;
+
+                    if (shouldFallback(targetKind, reason) && tryNextTransport(reason)) {
+                        return;
+                    }
+
+                    scheduleReconnect();
+                },
+                onMessage: (msg) => {
+                    if (connectionId !== transportIdRef.current) return;
+                    handleIncomingMessage(msg);
+                }
+            });
+
+            transportRef.current = transport;
+            transport.connect();
+        };
+
+        connect(0);
 
         return () => {
             closedByUnmount = true;
             clearReconnectTimeout();
-            if (wsRef.current) {
-                wsRef.current.close();
+            if (transportRef.current) {
+                transportRef.current.close();
             }
         };
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-    const sendMessage = useCallback((type: string, payload?: any, to?: string) => {
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            const realMsg = {
-                v: 1,
-                type,
-                rid: currentRoomIdRef.current || undefined,
-                cid: clientIdRef.current || undefined,
-                to,
-                payload
-            };
-
-            console.log('TX:', realMsg);
-            wsRef.current.send(JSON.stringify(realMsg));
-        } else {
-            console.warn('WS not connected');
-        }
-    }, []);
+    }, [handleIncomingMessage, joinRoom, showToast, t]);
 
     const clearError = useCallback(() => setError(null), []);
-
-    const joinRoom = useCallback((roomId: string) => {
-        console.log(`[Signaling] joinRoom call for ${roomId}`);
-        setError(null);
-        currentRoomIdRef.current = roomId;
-        currentRoomIdRef.current = roomId;
-        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            const payload: any = { capabilities: { trickleIce: true } };
-            // If we have a previous client ID, send it to help server evict ghosts
-            if (lastClientIdRef.current) {
-                payload.reconnectCid = lastClientIdRef.current;
-            }
-            sendMessage('join', payload);
-        } else {
-            console.log('[Signaling] WS not ready, buffering join');
-            pendingJoinRef.current = roomId;
-        }
-    }, [sendMessage]);
 
     const leaveRoom = useCallback(() => {
         sendMessage('leave');
         currentRoomIdRef.current = null;
         lastClientIdRef.current = null; // Clear last ID on explicit leave
+        needsRejoinRef.current = false;
+        clearReconnectStorage();
         setRoomState(null);
-    }, [sendMessage]);
+    }, [clearReconnectStorage, sendMessage]);
 
     const endRoom = useCallback(() => {
         sendMessage('end_room');
@@ -275,6 +362,7 @@ export const SignalingProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return (
         <SignalingContext.Provider value={{
             isConnected,
+            activeTransport,
             clientId,
             roomState,
             turnToken,

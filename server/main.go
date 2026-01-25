@@ -41,9 +41,20 @@ func main() {
 		}
 	}
 
+	withTimeout := func(h http.HandlerFunc, d time.Duration) http.HandlerFunc {
+		if d <= 0 {
+			return h
+		}
+		return func(w http.ResponseWriter, r *http.Request) {
+			http.TimeoutHandler(h, d, "Request timed out").ServeHTTP(w, r)
+		}
+	}
+
 	// Rate Limiters
 	// WS: 10 connections per minute per IP
 	wsLimiter := NewIPLimiter(10.0/60.0, 5)
+	// SSE: allow bursts for signaling messages
+	sseLimiter := NewIPLimiter(1200.0/60.0, 200)
 	wsBlockMode := strings.TrimSpace(os.Getenv("BLOCK_WEBSOCKET"))
 	wsHang := strings.EqualFold(wsBlockMode, "hang")
 	wsBlocked := !wsHang && strings.EqualFold(wsBlockMode, "block")
@@ -65,12 +76,13 @@ func main() {
 		}
 		serveWs(hub, w, r)
 	}))
+	http.HandleFunc("/sse", rateLimitMiddleware(sseLimiter, enableCors(handleSSE(hub))))
 
-	http.HandleFunc("/api/turn-credentials", rateLimitMiddleware(turnCredsLimiter, enableCors(handleTurnCredentials())))
-	http.HandleFunc("/api/diagnostic-token", rateLimitMiddleware(diagnosticLimiter, enableCors(handleDiagnosticToken())))
-	http.HandleFunc("/api/room-id", rateLimitMiddleware(roomIDLimiter, enableCors(handleRoomID())))
+	http.HandleFunc("/api/turn-credentials", withTimeout(rateLimitMiddleware(turnCredsLimiter, enableCors(handleTurnCredentials())), 15*time.Second))
+	http.HandleFunc("/api/diagnostic-token", withTimeout(rateLimitMiddleware(diagnosticLimiter, enableCors(handleDiagnosticToken())), 15*time.Second))
+	http.HandleFunc("/api/room-id", withTimeout(rateLimitMiddleware(roomIDLimiter, enableCors(handleRoomID())), 15*time.Second))
 
-	http.HandleFunc("/device-check", handleDeviceCheck)
+	http.HandleFunc("/device-check", withTimeout(handleDeviceCheck, 15*time.Second))
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -82,7 +94,7 @@ func main() {
 		Addr:              ":" + port,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
-		WriteTimeout:      15 * time.Second,
+		WriteTimeout:      0,
 		IdleTimeout:       60 * time.Second,
 	}
 	if err := server.ListenAndServe(); err != nil {
