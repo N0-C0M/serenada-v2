@@ -97,6 +97,9 @@ See [DEPLOY.md](DEPLOY.md) for detailed self-hosting instructions.
 | Proxy | Nginx |
 | Containers | Docker, Docker Compose |
 
+##Apps
+Android - https://github.com/N0-C0M/Serenada-v2-android
+
 ## License
 
 This project is licensed under the BSD 3-Clause License. See [LICENSE](LICENSE) for details.
