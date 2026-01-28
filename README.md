@@ -97,7 +97,7 @@ See [DEPLOY.md](DEPLOY.md) for detailed self-hosting instructions.
 | Proxy | Nginx |
 | Containers | Docker, Docker Compose |
 
-##Apps
+## Apps
 
 Android - https://github.com/N0-C0M/Serenada-v2-android
 
