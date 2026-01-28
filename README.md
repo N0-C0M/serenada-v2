@@ -98,6 +98,7 @@ See [DEPLOY.md](DEPLOY.md) for detailed self-hosting instructions.
 | Containers | Docker, Docker Compose |
 
 ##Apps
+
 Android - https://github.com/N0-C0M/Serenada-v2-android
 
 ## License
