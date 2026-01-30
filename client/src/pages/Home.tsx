@@ -1,106 +1,50 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Video, Zap, Shield, Lock, Smartphone, Code } from 'lucide-react';
-import RecentCalls from '../components/RecentCalls';
-import Footer from '../components/Footer';
-import { getRecentCalls } from '../utils/callHistory';
-import type { RecentCall } from '../utils/callHistory';
-import { useSignaling } from '../contexts/SignalingContext';
-import { useTranslation } from 'react-i18next';
-import { useToast } from '../contexts/ToastContext';
+import React from 'react';
+import { Link } from 'react-router-dom';
+import { Video, LogIn, UserPlus } from 'lucide-react';
 
-const Home: React.FC = () => {
-    const { t } = useTranslation();
-    const { showToast } = useToast();
-    const navigate = useNavigate();
-    const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
-    const [isCreating, setIsCreating] = useState(false);
-    const { watchRooms, roomStatuses, isConnected } = useSignaling();
-
-    useEffect(() => {
-        const calls = getRecentCalls();
-        setRecentCalls(calls);
-
-        if (calls.length > 0 && isConnected) {
-            const rids = calls.map(c => c.roomId);
-            watchRooms(rids);
-        }
-    }, [isConnected]);
-
-    const startCall = async () => {
-        if (isCreating) return;
-        setIsCreating(true);
-        try {
-            let apiUrl = '/api/room-id';
-            const wsUrl = import.meta.env.VITE_WS_URL;
-            if (wsUrl) {
-                const url = new URL(wsUrl);
-                url.protocol = url.protocol === 'wss:' ? 'https:' : 'http:';
-                url.pathname = '/api/room-id';
-                url.search = '';
-                url.hash = '';
-                apiUrl = url.toString();
-            }
-
-            const res = await fetch(apiUrl, { method: 'POST' });
-            if (!res.ok) {
-                throw new Error(`Room ID request failed: ${res.status}`);
-            }
-            const data = await res.json();
-            if (!data?.roomId) {
-                throw new Error('Room ID missing from response');
-            }
-            navigate(`/call/${data.roomId}`);
-        } catch (err) {
-            console.error('Failed to create room', err);
-            showToast('error', t('toast_room_create_error'));
-        } finally {
-            setIsCreating(false);
-        }
-    };
-
-    const benefits = [
-        { icon: <Zap className="benefit-icon" />, title: t('benefit_instant_title'), desc: t('benefit_instant_desc') },
-        { icon: <Shield className="benefit-icon" />, title: t('benefit_privacy_title'), desc: t('benefit_privacy_desc') },
-        { icon: <Lock className="benefit-icon" />, title: t('benefit_secure_title'), desc: t('benefit_secure_desc') },
-        { icon: <Smartphone className="benefit-icon" />, title: t('benefit_universal_title'), desc: t('benefit_universal_desc') },
-        { icon: <Code className="benefit-icon" />, title: t('benefit_opensource_title'), desc: t('benefit_opensource_desc') },
-    ];
-
-    return (
-        <div className={`page-container ${recentCalls.length > 0 ? 'compact' : ''}`}>
-            <div className="home-content center-content">
-                <h1 className="title">{t('app_title')}</h1>
-                <p className="subtitle">
-                    {t('app_subtitle_1')} <br />
-                    {t('app_subtitle_2')}
-                </p>
-
-                <button onClick={startCall} className="btn-primary btn-large" disabled={isCreating}>
-                    <Video className="icon" />
-                    {t('start_call')}
-                </button>
-
-                <RecentCalls calls={recentCalls} roomStatuses={roomStatuses} />
-            </div>
-
-            <div className="benefits-container">
-                <div className="benefits-grid">
-                    {benefits.map((b, i) => (
-                        <div key={i} className="benefit-card">
-                            {b.icon}
-                            <div className="benefit-content">
-                                <h3 className="benefit-title">{b.title}</h3>
-                                <p className="benefit-desc">{b.desc}</p>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            <Footer />
+export const Home: React.FC = () => {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8 animate-fade-in">
+          <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl shadow-lg shadow-indigo-200 mb-4">
+            <Video className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            Serenada
+          </h1>
+          <p className="text-gray-600 mt-2">Connect with anyone, anywhere</p>
         </div>
-    );
-};
 
-export default Home;
+        <div className="bg-white rounded-2xl shadow-xl p-8 animate-slide-up space-y-4">
+          {/* Quick Call Button */}
+          <Link
+            to="/quick-call"
+            className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-indigo-600 hover:to-purple-700 transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-indigo-200 flex items-center justify-center"
+          >
+            <Video className="w-5 h-5 mr-2" />
+            Start Instant Call
+          </Link>
+
+          {/* Login Button */}
+          <Link
+            to="/login"
+            className="w-full bg-white border border-indigo-400 text-indigo-600 py-3 rounded-lg font-semibold hover:bg-indigo-50 transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-sm flex items-center justify-center"
+          >
+            <LogIn className="w-5 h-5 mr-2" />
+            Sign In
+          </Link>
+
+          {/* Register Button */}
+          <Link
+            to="/register"
+            className="w-full bg-white border border-indigo-400 text-indigo-600 py-3 rounded-lg font-semibold hover:bg-indigo-50 transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-sm flex items-center justify-center"
+          >
+            <UserPlus className="w-5 h-5 mr-2" />
+            Sign Up
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+};
