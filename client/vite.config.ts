@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import legacy from '@vitejs/plugin-legacy'
+import { viteSingleFile } from 'vite-plugin-singlefile'
+import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -8,10 +10,16 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TRANSPORTS'],
   plugins: [
     react(),
+    viteSingleFile(),
     legacy({
       targets: ['defaults', 'not IE 11', 'Android >= 7'],
     }),
   ],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
+  },
   server: {
     proxy: {
       '/api': {
