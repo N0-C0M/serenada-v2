@@ -6,7 +6,7 @@ import { Register } from './pages/Register';
 import { Chats } from './pages/Chats';
 import { Chat } from './pages/Chat';
 import { QuickCall } from './pages/QuickCall';
-import { CallRoom } from './pages/CallRoom';
+import CallRoom from './pages/CallRoom';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
