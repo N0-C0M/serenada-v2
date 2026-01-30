@@ -588,7 +588,7 @@ func (h *Hub) broadcastRoomState(room *Room) {
 
 	log.Printf("[BROADCAST] Room State for %s: %d participants", rid, len(participants))
 
-	msg := Message{
+	msg := SignalingMessage{
 		V:       1,
 		Type:    "room_state",
 		RID:     rid,
@@ -681,7 +681,7 @@ func (h *Hub) broadcastRoomStatusUpdate(rid string) {
 		"count": count,
 	})
 
-	msg := Message{
+	msg := SignalingMessage{
 		V:       1,
 		Type:    "room_status_update",
 		Payload: payload,
