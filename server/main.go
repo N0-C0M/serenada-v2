@@ -90,7 +90,17 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("Server starting on :%s", port)
+    log.Printf("Server starting on :%s", port)
+
+    if err := InitPushService(); err != nil {
+        log.Fatalf("Failed to initialize push service: %v", err)
+    }
+
+    // Push endpoints
+    http.HandleFunc("/api/push/vapid-public-key", enableCors(handlePushVapidKey))
+    http.HandleFunc("/api/push/subscribe", enableCors(handlePushSubscribe))
+    http.HandleFunc("/api/push/recipients", enableCors(handlePushRecipients))
+    http.Handle("/api/push/snapshot/", enableCors(http.StripPrefix("/api/push/snapshot", http.HandlerFunc(handlePushSnapshot))))
 	server := &http.Server{
 		Addr:              ":" + port,
 		ReadHeaderTimeout: 5 * time.Second,
