@@ -1,6 +1,9 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import legacy from '@vitejs/plugin-legacy'
+import { viteSingleFile } from 'vite-plugin-singlefile'
+import tailwindcss from 'tailwindcss'
+import path from 'path'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -9,7 +12,7 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(), 
-    viteSingleFile()
+    viteSingleFile(),
     legacy({
       targets: ['defaults', 'not IE 11', 'Android >= 7'],
     }),
