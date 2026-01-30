@@ -67,7 +67,23 @@ func main() {
 	http.HandleFunc("/ws-msg", handleMessagingWebSocket(authStore, msgStore))
 
 	// Room ID endpoint for quick calls
-	http.HandleFunc("/api/room-id", enableCors(handleRoomID()))
+    http.HandleFunc("/api/room-id", enableCors(handleRoomID()))
+
+	http.HandleFunc("/.well-known/assetlinks.json", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.example.serenada_v2",
+      "sha256_cert_fingerprints": [
+        "53:4C:45:58:80:B4:35:D2:DD:42:1F:7A:11:23:09:15:DD:5C:2C:8E:ED:A9:2B:B2:B9:A4:BF:86:93:2D:A9:F1"
+      ]
+    }
+  }
+]`))
+	})
 
 	port := os.Getenv("PORT")
 	if port == "" {
