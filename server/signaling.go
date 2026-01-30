@@ -20,7 +20,7 @@ const (
 )
 
 // Protocol structures
-type Message struct {
+type SignalingMessage struct {
 	V       int             `json:"v"`
 	Type    string          `json:"type"`
 	RID     string          `json:"rid,omitempty"`
@@ -133,7 +133,7 @@ func (c *Client) sendMessage(msg interface{}) {
 // Logic
 
 func (h *Hub) handleMessage(c *Client, msgBytes []byte) {
-	var msg Message
+	var msg SignalingMessage
 	if err := json.Unmarshal(msgBytes, &msg); err != nil {
 		c.sendError(msg.RID, "BAD_REQUEST", "Invalid JSON")
 		return
@@ -169,7 +169,7 @@ func (h *Hub) handleMessage(c *Client, msgBytes []byte) {
 	}
 }
 
-func (h *Hub) handleJoin(c *Client, msg Message) {
+func (h *Hub) handleJoin(c *Client, msg SignalingMessage) {
 	rid := msg.RID
 	if rid == "" {
 		c.sendError("", "BAD_REQUEST", "Missing roomId")
@@ -330,7 +330,7 @@ func (h *Hub) handleJoin(c *Client, msg Message) {
 
 	payloadBytes, _ := json.Marshal(payload)
 
-	c.sendMessage(Message{
+	c.sendMessage(SignalingMessage{
 		V:       1,
 		Type:    "joined",
 		RID:     rid,
@@ -346,14 +346,14 @@ func (h *Hub) handleJoin(c *Client, msg Message) {
 	h.broadcastRoomStatusUpdate(rid)
 }
 
-func (h *Hub) handleLeave(c *Client, msg Message) {
+func (h *Hub) handleLeave(c *Client, msg SignalingMessage) {
 	if c.rid == "" {
 		return
 	}
 	h.removeClientFromRoom(c)
 }
 
-func (h *Hub) handleEndRoom(c *Client, msg Message) {
+func (h *Hub) handleEndRoom(c *Client, msg SignalingMessage) {
 	rid := c.rid
 	if rid == "" {
 		return
@@ -392,7 +392,7 @@ func (h *Hub) handleEndRoom(c *Client, msg Message) {
 		"by":     c.cid,
 		"reason": "host_ended",
 	})
-	endMsg := Message{
+	endMsg := SignalingMessage{
 		V:       1,
 		Type:    "room_ended",
 		RID:     rid,
@@ -429,7 +429,7 @@ func (h *Hub) handleEndRoom(c *Client, msg Message) {
 	h.broadcastRoomStatusUpdate(rid)
 }
 
-func (h *Hub) handleRelay(c *Client, msg Message) {
+func (h *Hub) handleRelay(c *Client, msg SignalingMessage) {
 	if c.rid == "" {
 		log.Printf("[RELAY] Client %s (CID: %s) tried to relay but not in a room", c.sid, c.cid)
 		return
@@ -471,7 +471,7 @@ func (h *Hub) handleRelay(c *Client, msg Message) {
 
 	newPayload, _ := json.Marshal(rawPayload)
 
-	relayMsg := Message{
+	relayMsg := SignalingMessage{
 		V:       1,
 		Type:    msg.Type,
 		RID:     msg.RID,
@@ -605,7 +605,7 @@ func (c *Client) sendError(rid, code, message string) {
 		"code":    code,
 		"message": message,
 	})
-	c.sendMessage(Message{
+	c.sendMessage(SignalingMessage{
 		V:       1,
 		Type:    "error",
 		RID:     rid,
@@ -619,7 +619,7 @@ func generateID(prefix string) string {
 	return prefix + hex.EncodeToString(b)
 }
 
-func (h *Hub) handleWatchRooms(c *Client, msg Message) {
+func (h *Hub) handleWatchRooms(c *Client, msg SignalingMessage) {
 	var payload struct {
 		RIDs []string `json:"rids"`
 	}
@@ -652,7 +652,7 @@ func (h *Hub) handleWatchRooms(c *Client, msg Message) {
 	h.mu.Unlock()
 
 	statusBytes, _ := json.Marshal(status)
-	c.sendMessage(Message{
+	c.sendMessage(SignalingMessage{
 		V:       1,
 		Type:    "room_statuses",
 		Payload: statusBytes,

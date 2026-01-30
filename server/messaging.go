@@ -31,6 +31,15 @@ type ChatRoom struct {
 	mu                   sync.Mutex
 }
 
+// ChatRoomForClient is a simplified version of ChatRoom for client-side consumption
+type ChatRoomForClient struct {
+	ID                   string            `json:"id"`
+	Participants         []string          `json:"participants"`
+	ParticipantUsernames map[string]string `json:"participantUsernames"`
+	LastMessage          *Message          `json:"lastMessage,omitempty"`
+	UnreadCount          int               `json:"unreadCount"` // Specific for the requesting user
+}
+
 type MessagingStore struct {
 	chats       map[string]*ChatRoom   // chatID -> ChatRoom
 	userChats   map[string][]string    // userID -> []chatID
@@ -81,12 +90,12 @@ func (s *MessagingStore) getOrCreateChat(userID1, userID2, username1, username2 
 	return chat
 }
 
-func (s *MessagingStore) getUserChats(userID string) []*ChatRoom {
+func (s *MessagingStore) getUserChats(userID string) []*ChatRoomForClient {
 	s.mu.RLock()
 	chatIDs := s.userChats[userID]
 	s.mu.RUnlock()
 
-	chats := make([]*ChatRoom, 0, len(chatIDs))
+	chats := make([]*ChatRoomForClient, 0, len(chatIDs))
 	for _, chatID := range chatIDs {
 		s.mu.RLock()
 		chat := s.chats[chatID]
@@ -94,13 +103,13 @@ func (s *MessagingStore) getUserChats(userID string) []*ChatRoom {
 
 		if chat != nil {
 			chat.mu.Lock()
-			unreadCount := chat.UnreadCount[userID]
-			chatCopy := &ChatRoom{
+			currentUnreadCount := chat.UnreadCount[userID]
+			chatCopy := &ChatRoomForClient{
 				ID:                   chat.ID,
 				Participants:         chat.Participants,
 				ParticipantUsernames: chat.ParticipantUsernames,
 				LastMessage:          chat.LastMessage,
-				UnreadCount:          unreadCount,
+				UnreadCount:          currentUnreadCount,
 			}
 			chat.mu.Unlock()
 			chats = append(chats, chatCopy)
