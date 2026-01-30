@@ -8,9 +8,14 @@ export default defineConfig({
   envPrefix: ['VITE_', 'TRANSPORTS'],
   plugins: [
     react(),
+    tailwindcss(), 
+    viteSingleFile()
     legacy({
       targets: ['defaults', 'not IE 11', 'Android >= 7'],
     }),
+     alias: {
+      "@": path.resolve(__dirname, "src"),
+    },
   ],
   server: {
     proxy: {
